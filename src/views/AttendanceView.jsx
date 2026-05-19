@@ -464,8 +464,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                                                 <td className="p-4">
                                                     {empToday ? (
                                                         <div className="flex flex-col gap-0.5">
-                                                            {statusBadge(empToday.status)}
-                                                            <span className="text-[10px] font-bold text-gray-400 font-mono mt-0.5">IN: {empToday.clock_in}</span>
+                                                        {statusBadge(empToday.status, empToday.clock_out, empToday.date)}                                                            <span className="text-[10px] font-bold text-gray-400 font-mono mt-0.5">IN: {empToday.clock_in}</span>
                                                         </div>
                                                     ) : (
                                                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-gray-50 text-gray-400 border border-gray-200 dark:bg-gray-900/20 dark:text-gray-500 dark:border-gray-800">
