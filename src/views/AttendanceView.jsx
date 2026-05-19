@@ -240,14 +240,27 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         setIsLoading(false); 
     };
 
-    const statusBadge = (status) => {
-        const styles = {
-            'Present': 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950/30 dark:text-green-300 dark:border-green-900/50',
-            'Late': 'bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/30 dark:text-orange-300 dark:border-orange-900/50',
-            'Absent': 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900/50',
-        }[status] || 'bg-gray-100 text-gray-600';
-        return <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider ${styles}`}>{status}</span>;
-    };
+ const statusBadge = (status, clockOut, date) => {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 1. INCOMPLETE (Past Date)
+    if (!clockOut && date !== today) {
+        return <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50">Incomplete</span>;
+    }
+    
+    // 2. IN PROGRESS (Today)
+    if (!clockOut) {
+        return <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/50">In Progress</span>;
+    }
+
+    // 3. OTHERS
+    const styles = {
+        'Present': 'bg-green-100 text-green-700 border border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900/50',
+        'Late': 'bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900/50',
+    }[status] || 'bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-700 dark:text-gray-300';
+    
+    return <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${styles}`}>{status}</span>;
+};
 
     // =========================================================================
     // 💻 6. VIEWPORT DESIGN TEMPLATE RENDER MODULES
@@ -551,29 +564,27 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                     </div>
 
                     {/* INDOOR PERSONAL TIMELINE LOGS TABLE */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-gray-50/80 dark:bg-gray-700/40 border-b border-gray-100 dark:border-gray-700 text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                                    <tr>
-                                        <th className="p-4">Shift Calendar Date</th>
-                                        <th className="p-4">Operational Status</th>
-                                        <th className="p-4">Check In Log</th>
-                                        <th className="p-4">Check Out Log</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-xs font-semibold">
-                                    {myHistory.map(record => (
-                                        <tr key={record.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-all">
-                                            <td className="p-4 font-bold text-gray-700 dark:text-gray-200 font-mono">{record.date}</td>
-                                            <td className="p-4">{statusBadge(record.status)}</td>
-                                            <td className="p-4 text-gray-600 dark:text-gray-300 font-mono">{record.clock_in}</td>
-                                            <td className="p-4 text-gray-600 dark:text-gray-300 font-mono">{record.clock_out || '--:--'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                  <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+    <table className="w-full text-left border-collapse">
+        <thead className="bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 text-[10px] uppercase tracking-wider font-bold">
+            <tr>
+                <th className="p-4">Shift Calendar Date</th>
+                <th className="p-4">Operational Status</th>
+                <th className="p-4">Check In Log</th>
+                <th className="p-4">Check Out Log</th>
+            </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-xs">
+            {myHistory.map(record => (
+                <tr key={record.id} className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors duration-150 odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-800 dark:even:bg-gray-800/50">
+                    <td className="p-4 font-bold text-gray-700 dark:text-gray-200 font-mono">{record.date}</td>
+                    <td className="p-4">{statusBadge(record.status, record.clock_out, record.date)}</td>
+                    <td className="p-4 text-gray-600 dark:text-gray-400 font-mono tracking-tight">{record.clock_in}</td>
+                    <td className="p-4 text-gray-600 dark:text-gray-400 font-mono tracking-tight">{record.clock_out || '--:--'}</td>
+                </tr>
+            ))}
+        </tbody>
+    </table>
                     </div>
                 </>
             )}
