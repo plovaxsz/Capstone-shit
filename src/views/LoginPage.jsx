@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 import { sanitizeText } from '../utils/sanitize';
 
 // --- VISUAL MEDIA ASSETS ---
@@ -54,6 +55,14 @@ const LoginPage = () => {
     e.preventDefault();
     setError('');
     setMessage('');
+
+        const rateKey = isRegisterMode ? 'login-register' : 'login-signin';
+        const rateLimit = checkRateLimit(rateKey, 10000);
+        if (!rateLimit.allowed) {
+                setError(formatRateLimitMessage(rateLimit.retryAfterMs));
+                return;
+        }
+
     setLoading(true);
 
     try {

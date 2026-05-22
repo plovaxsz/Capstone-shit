@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { sanitizeText } from '../utils/sanitize';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * COMPONENT: ContributionsView
@@ -46,6 +47,13 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
     const handleCreateThread = async () => {
         const cleanPost = sanitizeText(newPost, { allowNewlines: true, maxLength: 2000 });
         if (!cleanPost) return;
+
+        const rateLimit = checkRateLimit('contributions-create-thread', 5000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             await supabase.from('contributions').insert({
@@ -93,6 +101,12 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
     const handleSendReply = async (postId, currentReplies = []) => {
         const cleanReply = sanitizeText(replyInputs[postId], { allowNewlines: true, maxLength: 1000 });
         if (!cleanReply) return;
+
+        const rateLimit = checkRateLimit(`contributions-reply-${postId}`, 5000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
 
         setSubmittingReplyId(postId);
         

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * COMPONENT: ChatBot
@@ -29,6 +30,12 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
 
     const handleSend = async () => {
         if (!input.trim()) return;
+
+        const rateLimit = checkRateLimit('chat-send-message', 8000);
+        if (!rateLimit.allowed) {
+            setMessages(prev => [...prev, { role: 'assistant', text: formatRateLimitMessage(rateLimit.retryAfterMs) }]);
+            return;
+        }
 
         // Keep secrets off the browser. The server must hold the Anthropic key.
         const apiUrl = import.meta.env.VITE_CHAT_API_URL || '/api/chat';
@@ -72,7 +79,11 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
             });
 
             if (!response.ok) {
-                throw new Error('Chat service is not configured.');
+                const errorData = await response.json().catch(() => ({}));
+                const message = errorData?.retryAfterMs
+                    ? formatRateLimitMessage(errorData.retryAfterMs)
+                    : (errorData?.error || 'Chat service is not configured.');
+                throw new Error(message);
             }
 
             const data = await response.json();

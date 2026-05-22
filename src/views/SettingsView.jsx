@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { sanitizeFileExtension } from '../utils/sanitize';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * COMPONENT: SettingsView
@@ -27,6 +28,12 @@ const SettingsView = ({ userProfile, fetchProfile }) => {
     const handleAvatarUpload = async (event) => {
         try {
             setUploading(true);
+
+            const rateLimit = checkRateLimit('settings-avatar-upload', 30000);
+            if (!rateLimit.allowed) {
+                alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+                return;
+            }
             
             // Edge-case check ensuring the file array payload exists safely
             if (!event.target.files || event.target.files.length === 0) {
@@ -76,6 +83,13 @@ const SettingsView = ({ userProfile, fetchProfile }) => {
             alert("Security discrepancy: Input passwords do not match.");
             return;
         }
+
+        const rateLimit = checkRateLimit('settings-password-change', 60000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
+
         if (password.length < 6) {
             alert("Security vulnerability: Passwords must contain at least 6 characters.");
             return;

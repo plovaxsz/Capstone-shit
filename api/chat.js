@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+const lastRequestTimes = new Map();
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -20,6 +22,22 @@ export default async function handler(req, res) {
   if (!Array.isArray(messages) || typeof system !== 'string') {
     return res.status(400).json({ error: 'Invalid chat payload.' });
   }
+
+  // Simple per-client cooldown so the proxy cannot be spammed in quick bursts.
+  const clientKey = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const lastRequestTime = lastRequestTimes.get(clientKey) || 0;
+  const cooldownMs = 8000;
+
+  if (now - lastRequestTime < cooldownMs) {
+    const retryAfterMs = cooldownMs - (now - lastRequestTime);
+    return res.status(429).json({
+      error: 'Too many requests.',
+      retryAfterMs,
+    });
+  }
+
+  lastRequestTimes.set(clientKey, now);
 
   try {
     const response = await anthropic.messages.create({

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { supabase } from '../supabaseClient'; 
 import ExportButton from '../components/ExportButton';
 import { sanitizeText } from '../utils/sanitize';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * COMPONENT: LeaveView
@@ -86,6 +87,12 @@ const LeaveView = ({ userProfile, allUsers = [], leaveRequests = [], fetchLeaveR
 
         if (!newRequest.start_date || !newRequest.end_date) {
             alert('Please fill out all dates.');
+            return;
+        }
+
+        const rateLimit = checkRateLimit('leave-submit-request', 10000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
             return;
         }
         

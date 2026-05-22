@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import Modal from '../components/Modal';
 import ExportButton from '../components/ExportButton';
 import { sanitizeText } from '../utils/sanitize';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * SUB-COMPONENT: UserAvatar
@@ -198,6 +199,13 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
             alert('Please fill out all required fields.');
             return;
         }
+
+        const rateLimit = checkRateLimit('tasks-create-task', 10000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
+
         const { error } = await supabase.from('tasks').insert({
             title: cleanTitle, // Removes markup and control characters before storing the task title
             description: cleanDescription, // Keeps task notes plain text before persistence
@@ -246,6 +254,12 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
      */
     const handleSaveDeadlineExtension = async () => {
         if (!extensionTask || !extensionDate) return;
+
+        const rateLimit = checkRateLimit(`tasks-extension-${extensionTask.id}`, 10000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
 
         // Hard minimum constraint verification safety layer
         if (extensionDate < tomorrowStr) {
@@ -317,6 +331,12 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
 
         const file = selectedFiles[taskId];
         if (!file) return;
+
+        const rateLimit = checkRateLimit(`tasks-upload-${taskId}`, 15000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
+        }
 
         setUploading(taskId);
         const filePath = `${userProfile.id}/${taskId}/${Date.now()}.${file.name.split('.').pop()}`;

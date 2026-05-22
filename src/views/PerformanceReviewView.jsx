@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { sanitizeText } from '../utils/sanitize';
+import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
 
 /**
  * COMPONENT: PerformanceReviewView
@@ -222,6 +223,12 @@ const PerformanceReviewView = ({ userProfile, allUsers = [], attendance = [], ta
         if (!selectedUserId) return alert("Please select an intern.");
         if (totalAnsweredQuestions < totalQuestionsCount) {
             return alert(`Incomplete Rubric: Missing ${totalQuestionsCount - totalAnsweredQuestions} criteria flags.`);
+        }
+
+        const rateLimit = checkRateLimit(`performance-submit-${userProfile.id}`, 20000);
+        if (!rateLimit.allowed) {
+            alert(formatRateLimitMessage(rateLimit.retryAfterMs));
+            return;
         }
 
         const cleanComments = sanitizeText(comments, { allowNewlines: true, maxLength: 5000 });
