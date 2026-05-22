@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { sanitizeFileExtension } from '../utils/sanitize';
 import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
+import { validateAvatarFile } from '../utils/validateMime';
 
 /**
  * COMPONENT: SettingsView
@@ -41,6 +42,15 @@ const SettingsView = ({ userProfile, fetchProfile }) => {
             }
 
             const file = event.target.files[0];
+                // Validate file MIME type and extension before upload
+                const validation = validateAvatarFile(file);
+                if (!validation.valid) {
+                    alert("❌ Avatar Upload Error: " + validation.error);
+                    setUploading(false);
+                    event.target.value = null;
+                    return;
+                }
+            
             // Keep only a safe file extension when building the storage path.
             const fileExt = sanitizeFileExtension(file.name);
             const filePath = `${userProfile.id}/${Date.now()}.${fileExt}`;

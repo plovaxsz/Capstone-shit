@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import ExportButton from '../components/ExportButton';
 import { sanitizeText } from '../utils/sanitize';
 import { checkRateLimit, formatRateLimitMessage } from '../utils/rateLimit';
+import { validateTaskSubmissionFile } from '../utils/validateMime';
 
 /**
  * SUB-COMPONENT: UserAvatar
@@ -321,7 +322,14 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
             return;
         }
         if (e.target.files?.[0]) {
-            setSelectedFiles(prev => ({ ...prev, [taskId]: e.target.files[0] })); 
+                const file = e.target.files[0];
+                const validation = validateTaskSubmissionFile(file);
+                if (!validation.valid) {
+                    alert("❌ File Upload Error: " + validation.error);
+                    e.target.value = null;
+                    return;
+                }
+                setSelectedFiles(prev => ({ ...prev, [taskId]: file })); 
         }
     };
 
