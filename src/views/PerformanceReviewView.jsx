@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { sanitizeText } from '../utils/sanitize';
 
 /**
  * COMPONENT: PerformanceReviewView
@@ -223,11 +224,13 @@ const PerformanceReviewView = ({ userProfile, allUsers = [], attendance = [], ta
             return alert(`Incomplete Rubric: Missing ${totalQuestionsCount - totalAnsweredQuestions} criteria flags.`);
         }
 
+        const cleanComments = sanitizeText(comments, { allowNewlines: true, maxLength: 5000 });
+
         setIsSubmitting(true);
         if (editingEvalId) {
             const { error } = await supabase
                 .from('performance_evaluations')
-                .update({ scores, final_score: pointTotal, comments })
+                .update({ scores, final_score: pointTotal, comments: cleanComments })
                 .eq('id', editingEvalId);
 
             if (error) alert("Update failed: " + error.message);
@@ -242,7 +245,7 @@ const PerformanceReviewView = ({ userProfile, allUsers = [], attendance = [], ta
                 supervisor_id: userProfile.id,
                 scores,
                 final_score: pointTotal,
-                comments
+                comments: cleanComments
             });
 
             if (error) alert("Submission failed: " + error.message);
@@ -258,7 +261,7 @@ const PerformanceReviewView = ({ userProfile, allUsers = [], attendance = [], ta
     const handleEditLoad = (evaluation) => {
         setSelectedUserId(evaluation.employee_id);
         setScores(evaluation.scores || {});
-        setComments(evaluation.comments || '');
+        setComments(sanitizeText(evaluation.comments || '', { allowNewlines: true, maxLength: 5000 }));
         setEditingEvalId(evaluation.id);
         setSelectedHistoricalEval(null);
     };
@@ -443,7 +446,7 @@ const PerformanceReviewView = ({ userProfile, allUsers = [], attendance = [], ta
                                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Supervisor Concluding Feedback Remarks</label>
                                         <textarea
                                             value={comments}
-                                            onChange={e => setComments(e.target.value)}
+                                            onChange={e => setComments(sanitizeText(e.target.value, { allowNewlines: true, maxLength: 5000 }))}
                                             className="w-full p-4 border border-gray-100 dark:border-gray-600 text-xs rounded-xl bg-gray-50/50 dark:bg-gray-900 dark:text-white resize-none focus:outline-none"
                                             placeholder="Write summary evaluation observations regarding strengths or performance indicators..."
                                             rows="2"

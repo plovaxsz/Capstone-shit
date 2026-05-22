@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import Modal from '../components/Modal';
 import ExportButton from '../components/ExportButton';
+import { sanitizeText } from '../utils/sanitize';
 
 /**
  * SUB-COMPONENT: UserAvatar
@@ -190,13 +191,16 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
      * TELEMETRY: Loops through every selected assignee array slot to dispatch matching workspace notice cards.
      */
     const handleCreateTask = async () => {
-        if (!newTask.title || newTask.assigned_to.length === 0 || !newTask.due_date) {
+        const cleanTitle = sanitizeText(newTask.title, { maxLength: 120 });
+        const cleanDescription = sanitizeText(newTask.description, { allowNewlines: true, maxLength: 2000 });
+
+        if (!cleanTitle || newTask.assigned_to.length === 0 || !newTask.due_date) {
             alert('Please fill out all required fields.');
             return;
         }
         const { error } = await supabase.from('tasks').insert({
-            title: newTask.title,
-            description: newTask.description,
+            title: cleanTitle, // Removes markup and control characters before storing the task title
+            description: cleanDescription, // Keeps task notes plain text before persistence
             assigned_to: newTask.assigned_to, 
             due_date: newTask.due_date,
             priority: newTask.priority,
@@ -253,12 +257,13 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
         let noticeText = '';
 
         if (extensionMode === 'reject') {
-            if (!extensionFeedback.trim()) {
+            const cleanFeedback = sanitizeText(extensionFeedback, { allowNewlines: true, maxLength: 1500 });
+            if (!cleanFeedback) {
                 alert("Please add a reason for the revision.");
                 return;
             }
             updatePayload.status = 'Revision Needed';
-            updatePayload.feedback = extensionFeedback.trim();
+            updatePayload.feedback = cleanFeedback; // Stores reviewer feedback as sanitized plain text
             noticeText = `Revision Required for "${extensionTask.title}". Extended Target: ${extensionDate}`;
         } else {
             noticeText = `🎉 Breathing Room: Deadline extended for "${extensionTask.title}" to ${extensionDate}.`;
@@ -553,11 +558,11 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
                 <div className="space-y-4">
                     <div>
                         <label className="text-xs font-bold text-gray-700 uppercase dark:text-gray-200">Title</label>
-                        <input type="text" value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})} className="w-full p-2 border border-gray-300 rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"/>
+                        <input type="text" value={newTask.title} onChange={e => setNewTask({...newTask, title: sanitizeText(e.target.value, { maxLength: 120 })})} className="w-full p-2 border border-gray-300 rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"/>
                     </div>
                     <div>
                         <label className="text-xs font-bold text-gray-700 uppercase dark:text-gray-200">Description</label>
-                        <textarea value={newTask.description} onChange={e => setNewTask({...newTask, description: e.target.value})} className="w-full p-2 border border-gray-300 rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none" rows="2"></textarea>
+                        <textarea value={newTask.description} onChange={e => setNewTask({...newTask, description: sanitizeText(e.target.value, { allowNewlines: true, maxLength: 2000 })})} className="w-full p-2 border border-gray-300 rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none" rows="2"></textarea>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -601,7 +606,7 @@ const TasksView = ({ userProfile, tasks = [], allUsers = [], fetchTasks, createN
                             <textarea
                                 required
                                 value={extensionFeedback}
-                                onChange={(e) => setExtensionFeedback(e.target.value)}
+                                onChange={(e) => setExtensionFeedback(sanitizeText(e.target.value, { allowNewlines: true, maxLength: 1500 }))}
                                 placeholder="Specify details, issues, or sections that need fixing..."
                                 className="w-full p-2.5 border rounded-xl dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none focus:outline-none"
                                 rows="3"

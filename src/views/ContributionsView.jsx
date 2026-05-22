@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { sanitizeText } from '../utils/sanitize';
 
 /**
  * COMPONENT: ContributionsView
@@ -43,13 +44,14 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
      * SCHEMA METRICS: Instantiates an empty `replies: []` array field block natively on row creation.
      */
     const handleCreateThread = async () => {
-        if (!newPost.trim()) return;
+        const cleanPost = sanitizeText(newPost, { allowNewlines: true, maxLength: 2000 });
+        if (!cleanPost) return;
         setIsSubmitting(true);
         try {
             await supabase.from('contributions').insert({
                 employee_id: userProfile.id,
                 date: new Date().toISOString().split('T')[0],
-                contribution: newPost.trim(),
+                contribution: cleanPost, // Removes markup and control characters before storing the post
                 category: category,
                 replies: [] // Injects base schema array node targets
             });
@@ -89,8 +91,8 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
      * randomized reply node key pointer, and performs an absolute row update mutation payload.
      */
     const handleSendReply = async (postId, currentReplies = []) => {
-        const text = replyInputs[postId];
-        if (!text || !text.trim()) return;
+        const cleanReply = sanitizeText(replyInputs[postId], { allowNewlines: true, maxLength: 1000 });
+        if (!cleanReply) return;
 
         setSubmittingReplyId(postId);
         
@@ -98,7 +100,7 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
         const nextReplyObject = {
             id: `reply-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
             author_id: userProfile.id,
-            message: text.trim(),
+            message: cleanReply, // Stores a sanitized comment so later renders stay safe
             timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
         };
 
@@ -175,7 +177,7 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
                     <div className="flex flex-col gap-3">
                         <textarea 
                             value={newPost} 
-                            onChange={(e) => setNewPost(e.target.value)}
+                            onChange={(e) => setNewPost(sanitizeText(e.target.value, { allowNewlines: true, maxLength: 2000 }))}
                             className="w-full p-4 border border-gray-100 rounded-xl text-xs bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 transition-all resize-none dark:bg-gray-900/40 dark:border-gray-600 dark:text-white dark:focus:bg-gray-900"
                             placeholder="What do you want to ask or share with the portal board?"
                             rows="3"
@@ -306,7 +308,7 @@ const ContributionsView = ({ userProfile, contributions = [], allUsers = [], fet
                                 <input 
                                     type="text"
                                     value={replyInputs[post.id] || ''}
-                                    onChange={(e) => setReplyInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
+                                    onChange={(e) => setReplyInputs(prev => ({ ...prev, [post.id]: sanitizeText(e.target.value, { allowNewlines: true, maxLength: 1000 }) }))}
                                     onKeyPress={(e) => e.key === 'Enter' && handleSendReply(post.id, postReplies)}
                                     placeholder={userProfile.role === 'supervisor' ? "Provide guidance or feedback..." : "Write a comment or answer..."}
                                     className="flex-1 p-2 text-xs border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:border-blue-500 bg-gray-50/50 dark:bg-gray-900/40 dark:text-white"

@@ -29,8 +29,9 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
 
     const handleSend = async () => {
         if (!input.trim()) return;
-        
-        const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+
+        // Keep secrets off the browser. The server must hold the Anthropic key.
+        const apiUrl = import.meta.env.VITE_CHAT_API_URL || '/api/chat';
         const userMessage = { role: 'user', text: input };
         const updatedHistory = [...messages, userMessage];
         
@@ -56,26 +57,29 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
             .map(msg => ({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.text }));
 
         try {
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
+            // Send the prompt to our own backend instead of calling Anthropic directly from the browser.
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerous-direct-browser-access': 'true'
                 },
                 body: JSON.stringify({
-                    model: "claude-opus-4-6",
+                    model: 'claude-opus-4-6',
                     max_tokens: 1024,
                     system: systemPrompt,
                     messages: formattedHistory
                 })
             });
 
+            if (!response.ok) {
+                throw new Error('Chat service is not configured.');
+            }
+
             const data = await response.json();
-            setMessages(prev => [...prev, { role: 'assistant', text: data.content[0].text }]);
+            const assistantText = data?.content?.[0]?.text || 'No response returned.';
+            setMessages(prev => [...prev, { role: 'assistant', text: assistantText }]);
         } catch (error) {
-            setMessages(prev => [...prev, { role: 'assistant', text: "Error: Connection issue." }]);
+            setMessages(prev => [...prev, { role: 'assistant', text: 'Error: Chat backend is unavailable.' }]);
         } finally {
             setIsLoading(false);
         }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { sanitizeFileExtension } from '../utils/sanitize';
 
 /**
  * COMPONENT: SettingsView
@@ -33,7 +34,8 @@ const SettingsView = ({ userProfile, fetchProfile }) => {
             }
 
             const file = event.target.files[0];
-            const fileExt = file.name.split('.').pop();
+            // Keep only a safe file extension when building the storage path.
+            const fileExt = sanitizeFileExtension(file.name);
             const filePath = `${userProfile.id}/${Date.now()}.${fileExt}`;
 
             // 1. Dispatch binary stream to Supabase Storage bucket asset paths

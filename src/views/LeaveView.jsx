@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient'; 
 import ExportButton from '../components/ExportButton';
+import { sanitizeText } from '../utils/sanitize';
 
 /**
  * COMPONENT: LeaveView
@@ -81,6 +82,8 @@ const LeaveView = ({ userProfile, allUsers = [], leaveRequests = [], fetchLeaveR
      */
     const handleSubmitRequest = async (e) => {
         e.preventDefault();
+        const cleanReason = sanitizeText(newRequest.reason, { allowNewlines: true, maxLength: 2000 });
+
         if (!newRequest.start_date || !newRequest.end_date) {
             alert('Please fill out all dates.');
             return;
@@ -89,6 +92,7 @@ const LeaveView = ({ userProfile, allUsers = [], leaveRequests = [], fetchLeaveR
         setLoading(true);
         const { error } = await supabase.from('leave_requests').insert({
             ...newRequest,
+            reason: cleanReason, // Keeps leave explanations plain text before persistence
             employee_id: userProfile.id,
             status: 'Pending' 
         });
@@ -339,7 +343,7 @@ const LeaveView = ({ userProfile, allUsers = [], leaveRequests = [], fetchLeaveR
                                     <input
                                         type="text"
                                         value={newRequest.reason}
-                                        onChange={e => setNewRequest({...newRequest, reason: e.target.value})}
+                                        onChange={e => setNewRequest({...newRequest, reason: sanitizeText(e.target.value, { allowNewlines: true, maxLength: 2000 })})}
                                         placeholder="e.g. Medical Appointment"
                                         className="w-full p-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 dark:text-white focus:outline-none font-medium"
                                         required

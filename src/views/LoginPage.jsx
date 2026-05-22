@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { sanitizeText } from '../utils/sanitize';
 
 // --- VISUAL MEDIA ASSETS ---
 import LoginLogo from '../assets/customs-logo.jpg';
@@ -58,7 +59,12 @@ const LoginPage = () => {
     try {
         if (isRegisterMode) {
             // Frontend safety validation check
-            if (!source.trim()) throw new Error("Please specify your University/Source origin.");
+            const cleanEmail = sanitizeText(email, { forceLowercase: true, maxLength: 254 });
+            const cleanName = sanitizeText(name, { maxLength: 100 });
+            const cleanInitials = sanitizeText(initials, { forceUppercase: true, maxLength: 2 });
+            const cleanSource = sanitizeText(source, { maxLength: 120 });
+
+            if (!cleanSource) throw new Error("Please specify your University/Source origin.");
             
             /**
              * AUTH DISPATCH CHANNEL: auth.signUp
@@ -66,24 +72,26 @@ const LoginPage = () => {
              * Trigger triggers automated insertion callbacks mapping rows to public.profiles natively.
              */
             const { error } = await supabase.auth.signUp({
-                email,
+                email: cleanEmail,
                 password,
                 options: { 
                     data: { 
-                        name: name.trim(), 
-                        initials: initials.trim().toUpperCase(),
-                        source: source.trim() // Maps the custom onboarding data pipeline cleanly
+                        name: cleanName, 
+                        initials: cleanInitials,
+                        source: cleanSource // Keeps onboarding text free of markup and control characters
                     } 
                 }
             });
             if (error) throw error;
             setMessage('Registration successful! Verify using the link dispatched to your email.');
         } else {
+            const cleanEmail = sanitizeText(email, { forceLowercase: true, maxLength: 254 });
+
             /**
              * ACCESS TOKEN REQUEST CHANNEL: auth.signInWithPassword
              * Authenticates official email handles and switches global state context inside root App.jsx.
              */
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
+            const { error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
             if (error) throw error;
         }
     } catch (err) {
