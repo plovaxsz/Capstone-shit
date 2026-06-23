@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import { Toaster, toast } from 'react-hot-toast';
+import * as faceapi from 'face-api.js';
 
 // --- COMPONENTS ---
 import Header from './components/Header';
@@ -39,19 +40,26 @@ const MainContent = ({ view, userProfile, ...props }) => {
 };
 
 export default function App() {
+  const WORK_START_TIME = '08:00';
+  const ATTENDANCE_TABLE = 'attendance';
+
   const [session, setSession] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [activeView, setActiveView] = useState('dashboard');
-  
-  // --- NEW: MOBILE SIDEBAR STATE ---
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-
-  // --- THEME STATE ---
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme) return storedTheme === 'dark';
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+
+  const [allUsers, setAllUsers] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [contributions, setContributions] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [reviews, setReviews] = useState([]);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -65,47 +73,117 @@ export default function App() {
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 
-  // --- DATA STATES ---
-  const [allUsers, setAllUsers] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [attendance, setAttendance] = useState([]);
-  const [leaveRequests, setLeaveRequests] = useState([]);
-  const [contributions, setContributions] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [reviews, setReviews] = useState([]);
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const MODEL_URL = '/models';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
+        console.info('🤖 [Face-API] All biometric weights loaded successfully!');
+      } catch (err) {
+        console.error('Gagal memuat model face-api:', err);
+      }
+    };
+    loadModels();
+  }, []);
 
-  // --- NOTIFICATION HELPER ---
-  const createNotification = async (userId, message) => {
-    try {
-      const { data: existing } = await supabase
-        .from('notifications')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('message', message)
-        .maybeSingle();
-
-      if (existing) return;
-
-      const { error } = await supabase.from('notifications').insert({
-        user_id: userId,
-        message,
-        read: false,
-        created_at: new Date().toISOString(),
-      });
-
-      if (error) console.error('Error creating notification:', error);
-    } catch (err) {
-      console.error('Unexpected error creating notification:', err);
-    }
-  };
-
-  // --- FETCHING FUNCTIONS ---
   const fetchProfile = async (userId) => {
     if (!userId) return;
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (!error) setUserProfile(data);
-    else console.error('Error fetching profile:', error);
+    if (!error && data) {
+      setUserProfile(data);
+    } else {
+      console.error('Error fetching profile:', error);
+    }
   };
+
+  const handleClockIn = async (userId) => {
+    if (!userId) return false;
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('attendance')
+      .select('id')
+      .eq('employee_id', userId)
+      .eq('date', today)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('Attendance check error:', checkError);
+      return false;
+    }
+
+    if (existingRecord) {
+      console.info(`User ${userId} sudah absen hari ini`);
+      return true;
+    }
+
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-GB', { hour12: false });
+    const status = time > WORK_START_TIME ? 'Late' : 'Present';
+
+    const { error } = await supabase.from(ATTENDANCE_TABLE).insert([{
+      employee_id: userId,
+      date: today,
+      status,
+      clock_in: time
+    }]);
+
+    if (error) {
+      console.error('Clock-in error:', error);
+      return false;
+    }
+
+    return true;
+  };
+
+  useEffect(() => {
+    const handleBiometricLogin = async (e) => {
+      try {
+        const { user_id, email } = e.detail;
+        setSession({ user: { id: user_id, email } });
+        await fetchProfile(user_id);
+        await handleClockIn(user_id);
+        localStorage.removeItem('biometric_auth');
+        toast.success('Login Biometrik Sukses, Wir! 🦅');
+      } catch (err) {
+        console.error('Gagal eksekusi auth biometrik:', err);
+        toast.error('Gagal sinkronisasi sesi wajah.');
+      }
+    };
+
+    window.addEventListener('biometric_login_success', handleBiometricLogin);
+    return () => window.removeEventListener('biometric_login_success', handleBiometricLogin);
+  }, []);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setUserProfile(null);
+        setTasks([]);
+        setAttendance([]);
+        setLeaveRequests([]);
+        setContributions([]);
+        setNotifications([]);
+        setAllUsers([]);
+        setReviews([]);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) fetchProfile(session.user.id);
+    });
+  }, []);
 
   const fetchAllUsers = async () => {
     const { data, error } = await supabase.from('profiles').select('*');
@@ -161,7 +239,30 @@ export default function App() {
     if (!error) setNotifications(data || []);
   };
 
-  // --- EFFECTS ---
+  const createNotification = async (userId, message) => {
+    try {
+      const { data: existing } = await supabase
+        .from('notifications')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('message', message)
+        .maybeSingle();
+
+      if (existing) return;
+
+      const { error } = await supabase.from('notifications').insert({
+        user_id: userId,
+        message,
+        read: false,
+        created_at: new Date().toISOString(),
+      });
+
+      if (error) console.error('Error creating notification:', error);
+    } catch (err) {
+      console.error('Unexpected error creating notification:', err);
+    }
+  };
+
   const hasWelcomed = useRef(false);
   useEffect(() => {
     if (!userProfile || hasWelcomed.current) return;
@@ -174,32 +275,6 @@ export default function App() {
   }, [userProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
-      else {
-        setUserProfile(null);
-        // Clear all data on logout
-        setTasks([]);
-        setAttendance([]);
-        setLeaveRequests([]);
-        setContributions([]);
-        setNotifications([]);
-        setAllUsers([]);
-        setReviews([]);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Fetch all data when userProfile is loaded
-  useEffect(() => {
     if (userProfile) {
       fetchTasks(userProfile);
       fetchAttendance(userProfile);
@@ -207,11 +282,10 @@ export default function App() {
       fetchContributions(userProfile);
       fetchNotifications(userProfile);
       fetchReviews(userProfile);
-      fetchAllUsers(); 
+      fetchAllUsers();
     }
   }, [userProfile]);
 
-  // Real-time updates
   useEffect(() => {
     if (!userProfile) return;
 
@@ -244,14 +318,13 @@ export default function App() {
     if (error) console.error('Error marking notifications as read:', error);
   };
 
-  // --- RENDER LOADING / LOGIN ---
   if (session === null || (session && userProfile === null)) {
     if (session && !userProfile) {
       return (
         <div className="flex justify-center items-center h-screen bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
           <div className="animate-pulse flex flex-col items-center gap-4">
-             <div className="h-12 w-12 bg-gray-200 rounded-full dark:bg-gray-700"></div>
-             <div className="h-4 w-32 bg-gray-200 rounded dark:bg-gray-700"></div>
+            <div className="h-12 w-12 bg-gray-200 rounded-full dark:bg-gray-700"></div>
+            <div className="h-4 w-32 bg-gray-200 rounded dark:bg-gray-700"></div>
           </div>
         </div>
       );
@@ -259,60 +332,52 @@ export default function App() {
     return <LoginPage />;
   }
 
-  // --- MAIN LAYOUT RENDER ---
   return (
     <div className="flex min-h-screen font-sans bg-gray-50 dark:bg-slate-900 transition-colors duration-200">
       <Toaster position="top-right" toastOptions={{ className: 'dark:bg-gray-700 dark:text-white' }} />
-      
-      {/* 1. SIDEBAR (Fixed / Drawer) */}
-      <Sidebar 
-          userProfile={userProfile} 
-          activeView={activeView} 
-          setActiveView={setActiveView} 
-          isMobileOpen={isMobileOpen}       
-          setIsMobileOpen={setIsMobileOpen}
+
+      <Sidebar
+        userProfile={userProfile}
+        activeView={activeView}
+        setActiveView={setActiveView}
+        isMobileOpen={isMobileOpen}
+        setIsMobileOpen={setIsMobileOpen}
       />
 
-      {/* 2. MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col md:ml-64 transition-all duration-300 relative w-full">
-          
-          {/* HEADER */}
-          <Header
-            userProfile={userProfile}
-            onLogout={handleLogout}
-            notifications={notifications}
-            onNotificationsRead={handleNotificationsRead}
-            isDarkMode={isDarkMode}
-            toggleDarkMode={toggleDarkMode}
-            toggleMobileSidebar={() => setIsMobileOpen(!isMobileOpen)} 
-          />
+        <Header
+          userProfile={userProfile}
+          onLogout={handleLogout}
+          notifications={notifications}
+          onNotificationsRead={handleNotificationsRead}
+          isDarkMode={isDarkMode}
+          toggleDarkMode={toggleDarkMode}
+          toggleMobileSidebar={() => setIsMobileOpen(!isMobileOpen)}
+        />
 
-          {/* DYNAMIC VIEW */}
-          <main className="flex-1 overflow-y-auto p-0 relative">
-            {userProfile && (
-              <>
-                <MainContent
-                  view={activeView}
-                  userProfile={userProfile}
-                  allUsers={allUsers}
-                  tasks={tasks}
-                  fetchTasks={() => fetchTasks(userProfile)}
-                  attendance={attendance}
-                  fetchAttendance={() => fetchAttendance(userProfile)}
-                  leaveRequests={leaveRequests}
-                  fetchLeaveRequests={() => fetchLeaveRequests(userProfile)}
-                  contributions={contributions}
-                  fetchContributions={() => fetchContributions(userProfile)}
-                  fetchProfile={() => fetchProfile(userProfile.id)}
-                  createNotification={createNotification}
-                  reviews={reviews}
-                />
-                
-                {/* ChatBot Floating Button */}
-                <ChatBot userProfile={userProfile} tasks={tasks} />
-              </>
-            )}
-          </main>
+        <main className="flex-1 overflow-y-auto p-0 relative">
+          {userProfile && (
+            <>
+              <MainContent
+                view={activeView}
+                userProfile={userProfile}
+                allUsers={allUsers}
+                tasks={tasks}
+                fetchTasks={() => fetchTasks(userProfile)}
+                attendance={attendance}
+                fetchAttendance={() => fetchAttendance(userProfile)}
+                leaveRequests={leaveRequests}
+                fetchLeaveRequests={() => fetchLeaveRequests(userProfile)}
+                contributions={contributions}
+                fetchContributions={() => fetchContributions(userProfile)}
+                fetchProfile={() => fetchProfile(userProfile.id)}
+                createNotification={createNotification}
+                reviews={reviews}
+              />
+              <ChatBot userProfile={userProfile} tasks={tasks} />
+            </>
+          )}
+        </main>
       </div>
     </div>
   );

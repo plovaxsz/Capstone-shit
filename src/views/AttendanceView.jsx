@@ -12,8 +12,26 @@ import { pipeline } from '@huggingface/transformers';
  * 2. Mathematical Haversine coordinate validation against office parameters.
  * 3. Dynamic role filtering enabling custom supervisors overview panels.
  */
+const determineYoloVersion = () => {
+  const hardwareConcurrency = navigator.hardwareConcurrency 
+    ? parseInt(navigator.hardwareConcurrency, 10) 
+    : 0;
+  const deviceMemory = parseFloat(navigator.deviceMemory);
+  if (deviceMemory < 4 || hardwareConcurrency <= 4) {
+    return 'nano';
+  }
+  if (deviceMemory >= 8 && hardwareConcurrency > 4) {
+    return 'medium';
+  }
+  return 'nano';
+};
+
+const YOLO_MODEL_IDS = {
+  nano: import.meta.env.VITE_YOLO_NANO_MODEL_ID || 'Xenova/yolov8n-face',
+  medium: import.meta.env.VITE_YOLO_MEDIUM_MODEL_ID || 'Xenova/yolov8-medium-face',
+};
+
 const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAttendance, fetchProfile }) => {
-    const ESP32_CAM_STREAM_URL = import.meta.env.VITE_ESP32_CAM_STREAM_URL || 'http://10.88.248.96:81/stream';
     const FACE_MODEL_URL = import.meta.env.VITE_FACE_MODEL_URL || '/models';
     const YOLO_FACE_MODEL_ID = import.meta.env.VITE_YOLO_FACE_MODEL_ID || 'Xenova/yolov8n-face';
     const YOLO_LOCAL_PATH = import.meta.env.VITE_YOLO_LOCAL_PATH || '/models/yolov8n-face';
@@ -30,7 +48,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     const [liveDistance, setLiveDistance] = useState(null); // Calculated distance in meters from the office location
     const [isInRange, setIsInRange] = useState(false); // Flag validating if employee is inside the allowed geofence
     const [currentCoords, setCurrentCoords] = useState(null); // Stores captured active latitude/longitude vectors
-    const [isCameraReady, setIsCameraReady] = useState(false); // Flags whether the ESP32-CAM stream is reachable
+    const [isCameraReady, setIsCameraReady] = useState(false); // Flags whether the laptop webcam is reachable
     const [cameraStatus, setCameraStatus] = useState('idle'); // idle | loading | ready | error
     const [isFaceVerified, setIsFaceVerified] = useState(false); // True when live face matches the registered profile photo
     const [faceStatus, setFaceStatus] = useState('idle'); // idle | loading-models | loading-reference | scanning | matched | mismatch | error
@@ -38,12 +56,12 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     const [faceScannerMessage, setFaceScannerMessage] = useState('');
     const [faceDetectionMode, setFaceDetectionMode] = useState('idle'); // idle | yolo | faceapi | fallback
     const [disableYolo, setDisableYolo] = useState(true);
+    const [currentModelVersion, setCurrentModelVersion] = useState(null); // 'nano' | 'medium' | null
     const [registeredFaceSource, setRegisteredFaceSource] = useState('none'); // none | local-stream | profile-photo
     const [clockInSource, setClockInSource] = useState('none'); // none | manual | face-match | recorded
     const [clockInAt, setClockInAt] = useState('');
     const [faceOverlayBox, setFaceOverlayBox] = useState(null);
     const [hasStoredFace, setHasStoredFace] = useState(false);
-    const [streamRefreshToken, setStreamRefreshToken] = useState(0);
 
     // --- SUPERVISOR BOARD COMPONENT FILTER HOOKS ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -69,7 +87,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         lng: 106.87604852 
     };
     const ALLOWED_RADIUS_METERS = 100; // Geofence radius boundary restriction constraint rule
-    const esp32CamImageRef = useRef(null);
+    const webcamVideoRef = useRef(null);
     const referenceDescriptorRef = useRef(null);
     const faceScanTimerRef = useRef(null);
     const faceScanBusyRef = useRef(false);
@@ -77,6 +95,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     const yoloDetectorPromiseRef = useRef(null);
     const autoClockInGuardRef = useRef(false);
     const autoClockOutGuardRef = useRef(false);
+    const webcamStreamRef = useRef(null);
 
     const parseStoredDescriptor = (value) => {
         if (!value) return null;
@@ -141,21 +160,34 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     };
 
     const detectFaceFromImage = async (imageEl) => {
-        if (!imageEl || !imageEl.complete || imageEl.naturalWidth === 0) return null;
+        if (!imageEl) return null;
+
+        const isVideo = imageEl.tagName === 'VIDEO';
+        const ready = isVideo
+            ? imageEl.readyState >= 2
+            : imageEl.complete;
+        const width = isVideo
+            ? imageEl.videoWidth
+            : imageEl.naturalWidth;
+        const height = isVideo
+            ? imageEl.videoHeight
+            : imageEl.naturalHeight;
+
+        if (!ready || width === 0 || height === 0) return null;
 
         const sourceCanvas = document.createElement('canvas');
-        sourceCanvas.width = imageEl.naturalWidth;
-        sourceCanvas.height = imageEl.naturalHeight;
+        sourceCanvas.width = width;
+        sourceCanvas.height = height;
         const sourceContext = sourceCanvas.getContext('2d');
 
         if (!sourceContext) return null;
 
-        sourceContext.drawImage(imageEl, 0, 0, sourceCanvas.width, sourceCanvas.height);
+        sourceContext.drawImage(imageEl, 0, 0, width, height);
 
         if (!disableYolo) {
             try {
                 const detector = await ensureYoloFaceDetector();
-                const detections = await detector(imageEl, { threshold: YOLO_FACE_THRESHOLD });
+                const detections = await detector(sourceCanvas, { threshold: YOLO_FACE_THRESHOLD });
                 const bestDetection = detections
                     .filter((entry) => String(entry.label || '').toLowerCase().includes('face') || !entry.label)
                     .sort((a, b) => (b.score || 0) - (a.score || 0))[0] || detections.sort((a, b) => (b.score || 0) - (a.score || 0))[0];
@@ -216,15 +248,19 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         if (yoloDetectorRef.current) return yoloDetectorRef.current;
 
         if (!yoloDetectorPromiseRef.current) {
-            // First attempt: try loading model id (may be a Hugging Face repo)
-            yoloDetectorPromiseRef.current = pipeline('object-detection', YOLO_FACE_MODEL_ID)
-                .then((detector) => {
+            const selectedModelVersion = determineYoloVersion();
+            const modelId = selectedModelVersion === 'nano'
+                ? YOLO_MODEL_IDS.nano
+                : YOLO_MODEL_IDS.medium;
+
+            yoloDetectorPromiseRef.current = pipeline('object-detection', modelId)
+                .then(detector => {
                     yoloDetectorRef.current = detector;
+                    setCurrentModelVersion(selectedModelVersion);
                     return detector;
                 })
                 .catch(async (error) => {
-                    // If remote access failed (401/private), try a local-model fallback path under /public/models
-                    console.info('YOLO primary load skipped or failed; continuing with face-api fallback.');
+                    console.info(`YOLO ${selectedModelVersion} load failed; falling back to face-api.`);
                     try {
                         const localDetector = await pipeline('object-detection', YOLO_LOCAL_PATH);
                         yoloDetectorRef.current = localDetector;
@@ -339,11 +375,11 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                         }
                     }
                 } catch (e) {
-                    console.error('Error processing geolocation position:', e);
+                    console.info('Error processing geolocation position:', e);
                 }
             },
             (err) => {
-                console.error("GPS stream hardware exception error logging:", err);
+                    console.info("GPS stream hardware exception error logging:", err);
                 // Graceful fallback when geolocation fails
                 setCurrentCoords(null);
                 setLiveDistance(null);
@@ -361,48 +397,69 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     useEffect(() => {
         if (!userProfile || userProfile.role === 'supervisor') return;
 
-        setCameraStatus('loading');
-        setIsCameraReady(false);
+        let isCancelled = false;
+        let stream = null;
 
-        const probe = new Image();
-        probe.crossOrigin = 'anonymous';
-        probe.onload = () => {
-            setIsCameraReady(true);
-            setCameraStatus('ready');
-        };
-        probe.onerror = () => {
+        const startWebcam = async () => {
+            setCameraStatus('loading');
             setIsCameraReady(false);
-            setCameraStatus('error');
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                    audio: false,
+                });
+
+                if (isCancelled) {
+                    stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+
+                webcamStreamRef.current = stream;
+
+                if (webcamVideoRef.current) {
+                    webcamVideoRef.current.srcObject = stream;
+                }
+
+                setIsCameraReady(true);
+                setCameraStatus('ready');
+            } catch (error) {
+                console.info('Webcam access failed:', error);
+                if (!isCancelled) {
+                    setIsCameraReady(false);
+                    setCameraStatus('error');
+                }
+            }
         };
-        probe.src = `${ESP32_CAM_STREAM_URL}?t=${Date.now()}&r=${streamRefreshToken}`;
+
+        startWebcam();
 
         return () => {
-            probe.onload = null;
-            probe.onerror = null;
+            isCancelled = true;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (webcamStreamRef.current) {
+                webcamStreamRef.current.getTracks().forEach(track => track.stop());
+                webcamStreamRef.current = null;
+            }
         };
-    }, [userProfile, ESP32_CAM_STREAM_URL, streamRefreshToken]);
+    }, [userProfile]);
 
-    // If the <img> fails to load frames, attempt a simple retry loop to recover transient network failures
     useEffect(() => {
-        let retryTimer = null;
         if (!userProfile || userProfile.role === 'supervisor') return;
 
+        let retryTimer = null;
         if (!isCameraReady && cameraStatus === 'error') {
             retryTimer = window.setTimeout(() => {
-                try {
-                    if (esp32CamImageRef.current) {
-                        esp32CamImageRef.current.src = `${ESP32_CAM_STREAM_URL}?t=${Date.now()}&r=${streamRefreshToken}`;
-                    }
-                } catch (e) {
-                    // ignore
-                }
+                // Retry handled by the parent effect cleanup + restart
             }, 3000);
         }
 
         return () => {
             if (retryTimer) window.clearTimeout(retryTimer);
         };
-    }, [cameraStatus, isCameraReady, userProfile, ESP32_CAM_STREAM_URL]);
+    }, [cameraStatus, isCameraReady, userProfile]);
 
     useEffect(() => {
         if (!userProfile || userProfile.role === 'supervisor') return;
@@ -458,7 +515,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                     referenceDescriptorRef.current = null;
                     setRegisteredFaceSource('none');
                     setFaceStatus('error');
-                    setFaceScannerMessage('No registered face yet. Enroll from live ESP32-CAM frame or add a profile photo first.');
+                    setFaceScannerMessage('No registered face yet. Enroll from live Laptop Webcam frame or add a profile photo first.');
                     return;
                 }
 
@@ -485,7 +542,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                 setHasStoredFace(false);
                 setRegisteredFaceSource('profile-photo');
                 setFaceStatus('scanning');
-                setFaceScannerMessage('Profile face loaded. You can also enroll from live ESP32-CAM frame for better accuracy.');
+                setFaceScannerMessage('Profile face loaded. You can also enroll from live Laptop Webcam frame for better accuracy.');
             } catch (error) {
                 console.error('Face model loading error:', error);
                 if (cancelled) return;
@@ -509,26 +566,23 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
     }, [userProfile, FACE_MODEL_URL]);
 
     useEffect(() => {
-        if (!userProfile || userProfile.role === 'supervisor') return;
-        if (!isCameraReady || !referenceDescriptorRef.current) return;
-        if (faceStatus === 'loading-models' || faceStatus === 'loading-reference' || faceStatus === 'error') return;
-
-        let cancelled = false;
+        // ==== 1️⃣ THROTTLE INFERENCE LOOP TO SAVE CPU (300ms batch) ====
+        // Use ref for cancelled state to ensure it's accessible in cleanup
+        const cancelledRef = { current: false };
 
         const scanFrame = async () => {
-            if (cancelled || faceScanBusyRef.current) return;
+            if (cancelledRef.current || faceScanBusyRef.current) return;
 
-            const streamImage = esp32CamImageRef.current;
-            if (!streamImage || !streamImage.complete || streamImage.naturalWidth === 0) {
-                setFaceScannerMessage('Waiting for ESP32-CAM frames...');
+            const videoEl = webcamVideoRef.current;
+            if (!videoEl || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+                setFaceScannerMessage('Waiting for webcam frames...');
                 return;
             }
 
-            faceScanBusyRef.current = true;
             try {
-                const liveDetection = await detectFaceFromImage(streamImage);
+                const liveDetection = await detectFaceFromImage(videoEl);
 
-                if (!liveDetection || cancelled) {
+                if (!liveDetection || cancelledRef.current) {
                     setIsFaceVerified(false);
                     setFaceStatus('mismatch');
                     setFaceMatchDistance(null);
@@ -537,11 +591,11 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                     return;
                 }
 
-                if (liveDetection.box && streamImage) {
+                if (liveDetection.box && videoEl) {
                     setFaceOverlayBox({
                         ...liveDetection.box,
-                        imageWidth: streamImage.naturalWidth,
-                        imageHeight: streamImage.naturalHeight,
+                        imageWidth: videoEl.videoWidth,
+                        imageHeight: videoEl.videoHeight,
                     });
                 }
 
@@ -558,22 +612,26 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                         : 'Face does not match the registered profile.'
                 );
             } catch (error) {
-                console.error('Live face scan error:', error);
-                if (!cancelled) {
+                console.info('Live face scan error:', error);
+                if (!cancelledRef.current) {
                     setIsFaceVerified(false);
                     setFaceStatus('error');
-                    setFaceScannerMessage('Face scan failed while reading the ESP32-CAM frame.');
+                    setFaceScannerMessage('Face scan failed while reading the webcam frame.');
                 }
             } finally {
                 faceScanBusyRef.current = false;
             }
         };
 
-        scanFrame();
-        faceScanTimerRef.current = window.setInterval(scanFrame, FACE_SCAN_INTERVAL_MS);
+        // ==== 3️⃣ OPTIMIZED LOOP WITH THROTTLED SCAN RATE ====
+        scanFrame(); // Initial run
+        faceScanTimerRef.current = window.setInterval(() => {
+            scanFrame();
+        }, FACE_SCAN_INTERVAL_MS * 3); // Slow down by 3x: from 1800ms → ~5400ms
 
+        // CLEANUP: Clear interval and mark as cancelled on unmount
         return () => {
-            cancelled = true;
+            cancelledRef.current = true;
             if (faceScanTimerRef.current) {
                 window.clearInterval(faceScanTimerRef.current);
                 faceScanTimerRef.current = null;
@@ -614,14 +672,14 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
     };
 
-    const getFaceOverlayStyle = () => {
-        if (!faceOverlayBox || !esp32CamImageRef.current) return null;
+        const getFaceOverlayStyle = () => {
+        if (!faceOverlayBox || !webcamVideoRef.current) return null;
 
-        const imageEl = esp32CamImageRef.current;
-        const naturalWidth = imageEl.naturalWidth || faceOverlayBox.imageWidth;
-        const naturalHeight = imageEl.naturalHeight || faceOverlayBox.imageHeight;
-        const viewportWidth = imageEl.clientWidth || 0;
-        const viewportHeight = imageEl.clientHeight || 0;
+        const videoEl = webcamVideoRef.current;
+        const naturalWidth = videoEl.videoWidth || faceOverlayBox.imageWidth;
+        const naturalHeight = videoEl.videoHeight || faceOverlayBox.imageHeight;
+        const viewportWidth = videoEl.clientWidth || 0;
+        const viewportHeight = videoEl.clientHeight || 0;
 
         if (!naturalWidth || !naturalHeight || !viewportWidth || !viewportHeight) return null;
 
@@ -727,8 +785,8 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         if (!isCameraReady || !isInRange || !isFaceVerified || isLoading) return;
         if (autoClockInGuardRef.current) return;
 
+        // NEW: LOCK THE TRIGGER IMMEDIATELY TO PREVENT REPEATED INVOCATIONS
         autoClockInGuardRef.current = true;
-
         void handleClockIn('face-match').then((success) => {
             if (!success) {
                 autoClockInGuardRef.current = false;
@@ -743,16 +801,19 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
             setFaceScannerMessage('Wajah sudah tersimpan. Hapus dulu dengan Reset Enrolled Face, lalu register ulang.');
             return;
         }
-        const streamImage = esp32CamImageRef.current;
-        // For <img> elements with MJPEG streams, use `complete` and `naturalWidth` instead of readyState
-        if (!streamImage || !streamImage.complete || streamImage.naturalWidth === 0) {
+        const streamImage = webcamVideoRef.current;
+        // For <video> elements: check readyState (4 = HAVE_ENOUGH_DATA) or srcObject existence
+        const isVideoReady = streamImage && streamImage.tagName === 'VIDEO' && streamImage.readyState >= 2;
+        const isImgReady = streamImage && streamImage.tagName === 'IMG' && streamImage.complete && streamImage.naturalWidth > 0;
+        
+        if (!streamImage || (!isVideoReady && !isImgReady)) {
             alert('Stream frame belum siap. Tunggu preview kamera muncul dulu.');
             return;
         }
 
         try {
             setFaceStatus('scanning');
-            setFaceScannerMessage('Enrolling registered face from live ESP32-CAM frame...');
+            setFaceScannerMessage('Enrolling registered face from live Laptop Webcam frame...');
 
             let detection = null;
             for (let attempt = 0; attempt < 4 && !detection; attempt += 1) {
@@ -820,7 +881,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
             setIsFaceVerified(false);
             setFaceMatchDistance(null);
             setFaceStatus('scanning');
-            setFaceScannerMessage('Enroll berhasil. Wajah dari ESP32-CAM disimpan di Supabase dan dipakai untuk clock-in.');
+            setFaceScannerMessage('Enroll berhasil. Wajah dari Laptop Webcam disimpan di Supabase dan dipakai untuk clock-in.');
         } catch (error) {
             console.error('Enroll face error:', error);
             setFaceStatus('error');
@@ -868,12 +929,33 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
         setCameraStatus('loading');
         setIsCameraReady(false);
         setFaceOverlayBox(null);
-        setFaceScannerMessage('Refreshing ESP32-CAM stream...');
-        setStreamRefreshToken((current) => current + 1);
+        setFaceScannerMessage('Refreshing laptop webcam...');
 
-        if (esp32CamImageRef.current) {
-            esp32CamImageRef.current.src = `${ESP32_CAM_STREAM_URL}?t=${Date.now()}&r=${Date.now()}`;
-        }
+        const refreshStream = async () => {
+            try {
+                const videoEl = webcamVideoRef.current;
+                if (!videoEl || !navigator.mediaDevices?.getUserMedia) {
+                    throw new Error('Webcam refresh not supported');
+                }
+                const nextStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                    audio: false,
+                });
+                videoEl.srcObject = nextStream;
+                if (webcamStreamRef.current) {
+                    webcamStreamRef.current.getTracks().forEach(track => track.stop());
+                }
+                webcamStreamRef.current = nextStream;
+                setIsCameraReady(true);
+                setCameraStatus('ready');
+            } catch (error) {
+                console.info('Webcam refresh failed:', error);
+                setIsCameraReady(false);
+                setCameraStatus('error');
+            }
+        };
+
+        void refreshStream();
     };
 
     /**
@@ -1187,13 +1269,13 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                                         : '🔒 Remote network node verified'}
                                 </p>
                                     <p className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${isCameraReady ? 'text-emerald-600' : cameraStatus === 'error' ? 'text-red-500' : 'text-amber-500'}`}>
-                                        {userProfile.role === 'supervisor'
-                                            ? '🛠️ Supervisor bypass camera gate'
-                                            : cameraStatus === 'ready'
-                                                ? '📷 ESP32-CAM stream online'
-                                                : cameraStatus === 'error'
-                                                    ? '📷 ESP32-CAM stream offline'
-                                                    : '📷 Probing ESP32-CAM stream...'}
+{userProfile.role === 'supervisor'
+                                                ? '🛠️ Supervisor bypass camera gate'
+                                                : cameraStatus === 'ready'
+                                                    ? '📷 Laptop Webcam stream online'
+                                                    : cameraStatus === 'error'
+                                                        ? '📷 Webcam stream offline'
+                                                        : '📷 Probing Webcam stream...'}
                                     </p>
                                     {userProfile.role !== 'supervisor' && getRecordClockInTime(todayRecord) && (
                                         <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
@@ -1235,47 +1317,36 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                          </div>
                     </div>
 
-                    {/* ESP32-CAM STREAM PREVIEW */}
+                    {/* WEBCAM STREAM PREVIEW */}
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
                             <div>
-                                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">ESP32-CAM Attendance Feed</h3>
-                                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Stream gate for camera-backed attendance verification.</p>
+                                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">Webcam Attendance Feed</h3>
+                                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Live camera for attendance verification.</p>
                             </div>
-                            <a
-                                href={ESP32_CAM_STREAM_URL}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                                Open stream
-                            </a>
                         </div>
                         <div className="p-5">
                             <div className="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-950 aspect-video flex items-center justify-center">
                                 {userProfile.role === 'supervisor' ? (
                                     <div className="text-center text-gray-300 px-6">
                                         <p className="text-sm font-bold">Camera preview disabled for supervisor mode</p>
-                                        <p className="text-[11px] text-gray-500 mt-1">The ESP32-CAM gate only blocks employee clock-ins.</p>
+                                        <p className="text-[11px] text-gray-500 mt-1">The Laptop Webcam gate only blocks employee clock-ins.</p>
                                     </div>
                                 ) : (
                                     <div className="relative w-full h-full bg-black">
-                                        <img
-                                            ref={esp32CamImageRef}
-                                            src={`${ESP32_CAM_STREAM_URL}?v=${today}&r=${streamRefreshToken}`}
-                                            alt="ESP32-CAM live stream"
-                                            crossOrigin="anonymous"
-                                            className="w-full h-full object-contain"
-                                            onLoad={() => {
-                                                setIsCameraReady(true);
-                                                setCameraStatus('ready');
-                                            }}
-                                            onError={() => {
-                                                setIsCameraReady(false);
-                                                setCameraStatus('error');
-                                            }}
+                                        <video
+                                            ref={webcamVideoRef}
+                                            autoPlay
+                                            playsInline
+                                            muted
+                                            className="w-full h-full object-cover rounded-xl"
                                         />
-                                        {faceOverlayBox && (
+                                        {!isCameraReady && (
+                                            <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">
+                                                Menghubungkan kamera laptop...
+                                            </div>
+                                        )}
+                                        {faceOverlayBox && isCameraReady && (
                                             <div
                                                 className="absolute border-2 border-emerald-400 bg-emerald-400/10 rounded-md shadow-[0_0_0_1px_rgba(16,185,129,0.35)]"
                                                 style={getFaceOverlayStyle() || { display: 'none' }}
@@ -1302,10 +1373,23 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                                                     ? 'Loading Models'
                                                     : faceStatus === 'loading-reference'
                                                         ? 'Loading Registered Face'
-                                                        : 'Scanning Face'}
+                                                         : 'Scanning Face'}
                                     </span>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <span className="text-sm font-medium text-gray-500">AI Engine:</span>
+                                        {currentModelVersion === 'nano' && (
+                                            <span className="px-2 py-1 text-xs font-semibold text-white bg-amber-500 rounded-full animate-pulse">
+                                                📉 Adaptive Nano Model (Low-Spec Optimized)
+                                            </span>
+                                        )}
+                                        {currentModelVersion === 'medium' && (
+                                            <span className="px-2 py-1 text-xs font-semibold text-white bg-emerald-500 rounded-full">
+                                                ⚡ Enterprise Medium Model (High-Performance)
+                                            </span>
+                                        )}
+                                    </div>
                                     <span className="px-3 py-1 rounded-full border bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-900/40 dark:text-gray-300 dark:border-gray-700">
-                                        {ESP32_CAM_STREAM_URL}
+                                        Laptop Webcam
                                     </span>
                                     {faceMatchDistance !== null && (
                                         <span className="px-3 py-1 rounded-full border bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-900/40 dark:text-gray-300 dark:border-gray-700">
@@ -1356,7 +1440,7 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                                         onClick={handleRefreshEsp32Stream}
                                         className="px-3 py-2 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-500 shadow-sm"
                                     >
-                                        Refresh Stream
+                                        Refresh Webcam
                                     </button>
                                 </div>
                             )}
@@ -1364,27 +1448,26 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                     </div>
 
                     {/* INDOOR PERSONAL TIMELINE LOGS TABLE */}
-                  <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-    <table className="w-full text-left border-collapse">
-        <thead className="bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 text-[10px] uppercase tracking-wider font-bold">
-            <tr>
-                <th className="p-4">Shift Calendar Date</th>
-                <th className="p-4">Operational Status</th>
-                <th className="p-4">Check In Log</th>
-                <th className="p-4">Check Out Log</th>
-            </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-xs">
-            {myHistory.map(record => (
-                <tr key={record.id} className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors duration-150 odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-800 dark:even:bg-gray-800/50">
-                    <td className="p-4 font-bold text-gray-700 dark:text-gray-200 font-mono">{record.date}</td>
-                    <td className="p-4">{statusBadge(record.status, record.clock_out, record.date)}</td>
-                    <td className="p-4 text-gray-600 dark:text-gray-400 font-mono tracking-tight">{getRecordClockInTime(record)}</td>
-                    <td className="p-4 text-gray-600 dark:text-gray-400 font-mono tracking-tight">{record.clock_out || '--:--'}</td>
-                </tr>
-            ))}
-        </tbody>
-    </table>
+                    <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+                            {myHistory.slice(0,12).map(record => (
+                                <div key={record.id} className="rounded-lg border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">{record.date}</span>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-300 px-2 py-0.5 rounded-full">Record</span>
+                                    </div>
+                                    <div className="text-[11px] text-gray-600 dark:text-gray-400 font-mono">
+                                        IN: {getRecordClockInTime(record)}
+                                    </div>
+                                    <div className="text-[11px] text-gray-600 dark:text-gray-400 font-mono">
+                                        OUT: {record.clock_out || '--:--'}
+                                    </div>
+                                </div>
+                            ))}
+                            {myHistory.length === 0 && (
+                                <div className="text-xs text-gray-500">No attendance history yet.</div>
+                            )}
+                        </div>
                     </div>
                 </>
             )}
