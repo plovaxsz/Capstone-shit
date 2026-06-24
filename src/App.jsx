@@ -317,18 +317,6 @@ export default function App() {
     return () => supabase.removeChannel(channel);
   }, [userProfile]);
 
-  // Welcome message toaster hook
-  const hasWelcomed = useRef(false);
-  useEffect(() => {
-    if (!userProfile || hasWelcomed.current) return;
-    const lastWelcome = localStorage.getItem('lastWelcomeDate');
-    const today = new Date().toISOString().split('T')[0];
-    if (lastWelcome === today) return;
-    toast.success(`Welcome back, ${userProfile.name || 'User'}! 👋`);
-    hasWelcomed.current = true;
-    localStorage.setItem('lastWelcomeDate', today);
-  }, [userProfile]);
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
