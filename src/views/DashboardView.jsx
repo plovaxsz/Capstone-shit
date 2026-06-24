@@ -229,9 +229,9 @@ const DashboardView = ({ userProfile, tasks = [], leaveRequests = [], attendance
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {widgets.attendanceChart && (
                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 dark:bg-gray-800 dark:border-gray-700/60">
-                        <h2 className="text-sm font-bold text-gray-800 mb-4 dark:text-gray-100 uppercase tracking-wider text-gray-400">Attendance Trends Timeline</h2>
-                        <div style={{ width: '100%', height: 280 }} className="text-xs font-medium">
-                            <ResponsiveContainer>
+                        <h2 className="text-sm font-bold text-gray-700 mb-4 dark:text-gray-100 uppercase tracking-wider">Attendance Trends Timeline</h2>
+                        <div style={{ width: '100%', height: 280, minHeight: 200 }} className="text-xs font-medium">
+                            <ResponsiveContainer width="100%" height={280}>
                                 <LineChart data={attData}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} />
                                     <XAxis dataKey="name" stroke="#94a3b8" fontStyle="bold" />
@@ -252,9 +252,9 @@ const DashboardView = ({ userProfile, tasks = [], leaveRequests = [], attendance
 
                 {widgets.taskChart && (
                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 dark:bg-gray-800 dark:border-gray-700/60">
-                        <h2 className="text-sm font-bold text-gray-800 mb-4 dark:text-gray-100 uppercase tracking-wider text-gray-400">Deliverables Completed Volume</h2>
-                        <div style={{ width: '100%', height: 280 }} className="text-xs font-medium">
-                            <ResponsiveContainer>
+                        <h2 className="text-sm font-bold text-gray-700 mb-4 dark:text-gray-100 uppercase tracking-wider">Deliverables Completed Volume</h2>
+                        <div style={{ width: '100%', height: 280, minHeight: 200 }} className="text-xs font-medium">
+                            <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={taskData}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} />
                                     <XAxis dataKey="name" stroke="#94a3b8" fontStyle="bold" />
@@ -277,7 +277,7 @@ const DashboardView = ({ userProfile, tasks = [], leaveRequests = [], attendance
             {/* --- RECENT APPRAISAL LOGS TRANSCRIPTS --- */}
             {widgets.recentReviews && (
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 dark:bg-gray-800 dark:border-gray-700/60">
-                    <h2 className="text-sm font-bold text-gray-800 mb-4 dark:text-gray-100 uppercase tracking-wider text-gray-400">Institutional Performance Transcript Log</h2>
+                    <h2 className="text-sm font-bold text-gray-700 mb-4 dark:text-gray-100 uppercase tracking-wider">Institutional Performance Transcript Log</h2>
                     {reviews && reviews.length > 0 ? (
                         <div className="space-y-4">
                             {reviews.slice(0, 3).map(review => {

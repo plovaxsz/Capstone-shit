@@ -129,8 +129,8 @@ const SettingsView = ({ userProfile, fetchProfile }) => {
                 {/* --- CONTAINER SECTION 1: PROFILE PICTURE ASSET ENGINE --- */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 dark:bg-gray-800 dark:border-gray-700 flex flex-col justify-between">
                     <div>
-                        <h3 className="font-bold text-sm text-gray-800 dark:text-gray-100 mb-1">Profile Photo</h3>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 font-medium">Update workspace placeholder images visible on assignment tracking maps.</p>
+                        <h3 className="font-bold text-sm text-gray-800 dark:text-gray-100 mb-1">Registered Face Photo</h3>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 font-medium">Upload a clear frontal face photo. This image is used as the registered identity for attendance matching.</p>
                     </div>
                     
                     <div className="flex flex-col items-center py-4">
