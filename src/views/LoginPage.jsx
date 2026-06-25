@@ -135,13 +135,11 @@ const detectLoop = async () => {
           return;
         }
 
-      if (!videoRef.current) {
-        rafId = requestAnimationFrame(detectLoop);
-        return;
-      }
-
-      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
-        rafId = requestAnimationFrame(detectLoop);
+      if (!videoRef.current || videoRef.current.readyState !== 4) {
+        // Jika video belum siap (readyState < 4), jangan dipaksa. Tunggu 200ms lalu coba lagi!
+        setTimeout(() => {
+          rafId = requestAnimationFrame(detectLoop);
+        }, 200);
         return;
       }
 
