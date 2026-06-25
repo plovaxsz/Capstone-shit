@@ -82,11 +82,12 @@ export default function App() {
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const MODEL_URL = '/models';
+        const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
           faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
         ]);
         console.info('🤖 [Face-API] All biometric weights loaded successfully!');
       } catch (err) {
