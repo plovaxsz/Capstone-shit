@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import ExportButton from '../components/ExportButton';
 import * as faceapi from 'face-api.js';
-import { pipeline } from '@huggingface/transformers';
 
 /**
  * COMPONENT: AttendanceView
@@ -29,6 +28,16 @@ const determineYoloVersion = () => {
 const YOLO_MODEL_IDS = {
   nano: import.meta.env.VITE_YOLO_NANO_MODEL_ID || 'Xenova/yolov8n-face',
   medium: import.meta.env.VITE_YOLO_MEDIUM_MODEL_ID || 'Xenova/yolov8-medium-face',
+};
+
+const loadYoloPipeline = async (modelId) => {
+    try {
+        const { pipeline } = await import('@huggingface/transformers');
+        return await pipeline('object-detection', modelId);
+    } catch (err) {
+        console.warn('YOLO pipeline unavailable:', err);
+        return null;
+    }
 };
 
 const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAttendance, fetchProfile }) => {
@@ -253,8 +262,11 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                 ? YOLO_MODEL_IDS.nano
                 : YOLO_MODEL_IDS.medium;
 
-            yoloDetectorPromiseRef.current = pipeline('object-detection', modelId)
+            yoloDetectorPromiseRef.current = loadYoloPipeline(modelId)
                 .then(detector => {
+                    if (!detector) {
+                        throw new Error('YOLO pipeline unavailable');
+                    }
                     yoloDetectorRef.current = detector;
                     setCurrentModelVersion(selectedModelVersion);
                     return detector;
@@ -262,7 +274,10 @@ const AttendanceView = ({ userProfile, attendance = [], allUsers = [], fetchAtte
                 .catch(async (error) => {
                     console.info(`YOLO ${selectedModelVersion} load failed; falling back to face-api.`);
                     try {
-                        const localDetector = await pipeline('object-detection', YOLO_LOCAL_PATH);
+                        const localDetector = await loadYoloPipeline(YOLO_LOCAL_PATH);
+                        if (!localDetector) {
+                            throw new Error('Local YOLO pipeline unavailable');
+                        }
                         yoloDetectorRef.current = localDetector;
                         return localDetector;
                     } catch (localErr) {
