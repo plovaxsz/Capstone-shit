@@ -92,7 +92,7 @@ export default function App() {
 
   const fetchProfile = async (userId) => {
     if (!userId) return;
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
     if (!error && data) {
       setUserProfile(data);
     } else {
