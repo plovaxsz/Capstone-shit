@@ -124,11 +124,16 @@ async function fetchProfiles() {
   useEffect(() => {
     let rafId = null;
 
-    const detectLoop = async () => {
-       // 🛑 BENTENG UTAMA: Kalau lagi proses redirect, matikan mesin scan detik ini juga!
-      if (isRedirectingRef.current) {
-        return;
-      }
+const detectLoop = async () => {
+        // 🛑 BENTENG UTAMA: Kalau lagi proses redirect, matikan mesin scan detik ini juga!
+        if (isRedirectingRef.current) {
+          return;
+        }
+
+        // 🔥 KUNCI ANTI-FREEZE: Jika user sedang berada di mode Register, langsung CUT OFF!
+        if (authMode === 'register' && registerStep === 2) {
+          return;
+        }
 
       if (!videoRef.current) {
         rafId = requestAnimationFrame(detectLoop);
