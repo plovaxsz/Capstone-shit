@@ -16,7 +16,8 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
     ]);
 
     useEffect(() => {
-        if (!userProfile) return;
+        // Kunci Pengaman: Jika userProfile belum ada (belum login), langsung STOP!
+        if (!userProfile || !userProfile.name) return;
         const myActiveCount = tasks.filter(t => {
             const isActive = t.status === 'To Do' || t.status === 'In Progress' || t.status === 'Revision Needed';
             if (userProfile.role === 'supervisor') return isActive;
@@ -24,12 +25,18 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
         }).length;
 
         if (messages.length <= 1) {
-            setMessages([{ role: 'assistant', text: `Hi ${userProfile.name.split(' ')[0]}! I have indexed your workspace. There are ${myActiveCount} active assignments currently monitored.` }]);
+            // Gunakan optional chaining (?.) agar aman dari kehancuran data undefined
+            const firstName = userProfile?.name?.split(' ')[0] || 'User';
+            setMessages([{ role: 'assistant', text: `Hi ${firstName}! I have indexed your workspace. There are ${myActiveCount} active assignments currently monitored.` }]);
         }
     }, [tasks, userProfile]);
 
     const handleSend = async () => {
         if (!input.trim()) return;
+        if (!userProfile || !userProfile.name) {
+            setMessages(prev => [...prev, { role: 'assistant', text: 'Please log in first to use the chat feature.' }]);
+            return;
+        }
 
         const rateLimit = checkRateLimit('chat-send-message', 8000);
         if (!rateLimit.allowed) {
@@ -49,15 +56,15 @@ const ChatBot = ({ userProfile, tasks = [] }) => {
         // Prepare Context & Variables
         const sharedTasksContext = tasks.filter(t => {
             const isNotDone = !['Completed', 'Approved'].includes(t.status);
-            if (userProfile.role === 'supervisor') return isNotDone;
-            return isNotDone && (t.assigned_to || []).some(id => String(id) === String(userProfile.id));
+            if (userProfile?.role === 'supervisor') return isNotDone;
+            return isNotDone && (t.assigned_to || []).some(id => String(id) === String(userProfile?.id));
         });
         
         const taskContext = sharedTasksContext.length > 0 
             ? sharedTasksContext.map(t => `| ${t.title} | ${t.status} |`).join('\n')
             : "No active tasks found.";
 
-        const systemPrompt = `You are a professional Customs AI assistant for ${userProfile.name}. Current Workspace Context: ${taskContext}. Output all tables in Markdown.`;
+        const systemPrompt = `You are a professional Customs AI assistant for ${userProfile?.name || 'User'}. Current Workspace Context: ${taskContext}. Output all tables in Markdown.`;
 
         const formattedHistory = updatedHistory
             .filter(msg => !msg.text.includes("Initializing") && !msg.text.includes("Hi "))
